@@ -1,0 +1,173 @@
+{
+  "name": "OpsPilot - Telegram Callback Handler",
+  "nodes": [
+    {
+      "parameters": {
+        "updates": [
+          "callback_query"
+        ],
+        "additionalFields": {}
+      },
+      "id": "ddf45281-e4c7-407c-8846-1b144ca8c572",
+      "name": "Telegram Trigger",
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        1200,
+        368
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "REPLACE_WITH_YOUR_CREDENTIAL_ID",
+          "name": "telegramApi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const q = $json.callback_query || $json;\nconst data = q.data || '';\nif (!['approve', 'reject'].includes(data)) {\n  throw new Error('Invalid action: ' + data);\n}\nconst messageText = q.message?.text || '';\nconst idMatch = messageText.match(/#ID:(rec\\w+)/);\nif (!idMatch) {\n  throw new Error('Could not extract Airtable ID from message. Text: ' + messageText.slice(0, 100));\n}\nreturn { json: {\n  action: data,\n  recordId: idMatch[1],\n  callbackQueryId: q.id || '',\n  chatId: String(q.message?.chat?.id || ''),\n  messageId: q.message?.message_id || null,\n  userName: q.from?.first_name || 'Unknown'\n}};"
+      },
+      "id": "c657531f-858a-41e2-882b-d04335eb7336",
+      "name": "Parse Callback",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1424,
+        368
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "airtableOAuth2Api",
+        "operation": "update",
+        "base": {
+          "__rl": true,
+          "value": "appYOURBASEID0000",
+          "mode": "list"
+        },
+        "table": {
+          "__rl": true,
+          "value": "tblYOURTABLEID000",
+          "mode": "list"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "status": "={{ $json.action === 'approve' ? 'Approved' : 'Rejected' }}",
+            "validated_at": "={{ new Date().toISOString() }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "validated_at",
+              "displayName": "validated_at",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "dateTime",
+              "readOnly": false,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "d1c8f036-1578-4163-a484-48282ed53f1d",
+      "name": "Airtable Update Status",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.1,
+      "position": [
+        1648,
+        368
+      ],
+      "credentials": {
+        "airtableOAuth2Api": {
+          "id": "REPLACE_WITH_YOUR_CREDENTIAL_ID",
+          "name": "airtableOAuth2Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "callback",
+        "queryId": "={{ $('Parse Callback').item.json.callbackQueryId }}",
+        "additionalFields": {
+          "text": "={{ $('Parse Callback').item.json.action === 'approve' ? '✅ Draft approved and logged in Airtable' : '❌ Lead rejected and logged in Airtable' }}"
+        }
+      },
+      "id": "52e68ab7-e77c-4e32-89ec-212da3b2e31b",
+      "name": "Answer Callback Query",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1872,
+        368
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "REPLACE_WITH_YOUR_CREDENTIAL_ID",
+          "name": "telegramApi account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Telegram Trigger": {
+      "main": [
+        [
+          {
+            "node": "Parse Callback",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Callback": {
+      "main": [
+        [
+          {
+            "node": "Airtable Update Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Airtable Update Status": {
+      "main": [
+        [
+          {
+            "node": "Answer Callback Query",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false,
+    "timeSavedMode": "fixed",
+    "errorWorkflow": "0kfxJiDRZFwWfZVr",
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "meta": null
+}

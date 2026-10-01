@@ -1,0 +1,134 @@
+{
+  "name": "OpsPilot - Daily Report",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 8 * * *"
+            }
+          ]
+        }
+      },
+      "id": "dc3cf264-b817-4efa-a5e9-e5a368ad43c5",
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        2096,
+        416
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "airtableOAuth2Api",
+        "operation": "search",
+        "base": {
+          "__rl": true,
+          "value": "appYOURBASEID0000",
+          "mode": "list"
+        },
+        "table": {
+          "__rl": true,
+          "value": "tblYOURTABLEID000",
+          "mode": "list"
+        },
+        "options": {}
+      },
+      "id": "81297bcc-7667-44d4-96cd-78d56d45b402",
+      "name": "Airtable Get Records",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.1,
+      "position": [
+        2320,
+        416
+      ],
+      "credentials": {
+        "airtableOAuth2Api": {
+          "id": "REPLACE_WITH_YOUR_CREDENTIAL_ID",
+          "name": "airtableOAuth2Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const records = $input.all();\nconst total = records.length;\n\nif (total === 0) {\n  return [{ json: {\n    total: 0,\n    catLines: '',\n    priLines: '',\n    duplicates: 0,\n    approved: 0,\n    rejected: 0,\n    pending: 0,\n    errors: 0\n  }}];\n}\n\nconst byCategory = {};\nconst byPriority = {};\nlet duplicates = 0, approved = 0, rejected = 0, pending = 0, errors = 0;\n\nfor (const r of records) {\n  const f = r.json;\n  const cat = f.category || 'Unknown';\n  const pri = f.priority || 'Unknown';\n  const status = f.status || '';\n  const action = f.hs_action || '';\n  byCategory[cat] = (byCategory[cat] || 0) + 1;\n  byPriority[pri] = (byPriority[pri] || 0) + 1;\n  if (action === 'updated') duplicates++;\n  if (status === 'Approved') approved++;\n  if (status === 'Rejected') rejected++;\n  if (status === 'Processed') pending++;\n  if (status === 'Error') errors++;\n}\n\nconst catLines = Object.entries(byCategory)\n  .sort((a, b) => b[1] - a[1])\n  .map(([k, v]) => `  ${k}: ${v}`)\n  .join('\\n');\n\nconst priLines = Object.entries(byPriority)\n  .sort((a, b) => b[1] - a[1])\n  .map(([k, v]) => `  ${k}: ${v}`)\n  .join('\\n');\n\nreturn [{ json: { total, catLines, priLines, duplicates, approved, rejected, pending, errors } }];"
+      },
+      "id": "d703ebf7-f16b-4573-b71e-bbc844398e53",
+      "name": "Compute Stats",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2544,
+        416
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "REPLACE_WITH_YOUR_CHAT_ID",
+        "text": "={{ $json.total === 0\n  ? '📊 OpsPilot — Rapport du jour\\nAucun lead reçu dans les dernières 24h.'\n  : '📊 OpsPilot — Rapport du jour\\n━━━━━━━━━━━━━━━━\\nLeads reçus : ' + $json.total + '\\n\\nPar catégorie :\\n' + $json.catLines + '\\n\\nPar priorité :\\n' + $json.priLines + '\\n\\nHuman-in-the-loop :\\n  ✅ Approuvés : ' + $json.approved + '\\n  ❌ Rejetés : ' + $json.rejected + '\\n  ⏳ En attente : ' + $json.pending + '\\n\\nCRM :\\n  🔄 Doublons fusionnés : ' + $json.duplicates + '\\n  ❌ Erreurs : ' + $json.errors\n}}",
+        "additionalFields": {}
+      },
+      "id": "f0ad2e59-950d-445f-a8f0-3df6ed00ab15",
+      "name": "Telegram Daily Report",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        2768,
+        416
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "REPLACE_WITH_YOUR_CREDENTIAL_ID",
+          "name": "telegramApi account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Airtable Get Records",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Airtable Get Records": {
+      "main": [
+        [
+          {
+            "node": "Compute Stats",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Compute Stats": {
+      "main": [
+        [
+          {
+            "node": "Telegram Daily Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false,
+    "timeSavedMode": "fixed",
+    "errorWorkflow": "0kfxJiDRZFwWfZVr",
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "meta": null
+}

@@ -1,0 +1,1065 @@
+{
+  "name": "OpsPilot - Main Intake",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "opspilot-demo-request",
+        "options": {}
+      },
+      "id": "ce8e87a6-e0aa-465c-951c-0049a671e2c7",
+      "name": "Tally Demo Request Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        25936,
+        10832
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const input = $input.item.json || {};\nconst body = input.body && typeof input.body === 'object' ? input.body : input;\nconst data = body.data && typeof body.data === 'object' ? body.data : body;\nconst key = (v) => String(v || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();\nconst text = (v) => Array.isArray(v) ? v.map(text).filter(Boolean).join(', ') : (v == null ? '' : String(v).trim());\nconst flat = {};\nfor (const obj of [input, body, data]) {\n  if (!obj || typeof obj !== 'object') continue;\n  for (const [k, v] of Object.entries(obj)) {\n    if (v == null || typeof v !== 'object') flat[key(k)] = text(v);\n  }\n  for (const field of (obj.fields || obj.answers || [])) {\n    const value = text(field.value ?? field.answer ?? field.text ?? field.response);\n    for (const label of [field.key, field.label, field.name, field.title]) {\n      if (label && value) flat[key(label)] = value;\n    }\n  }\n}\nconst pick = (...labels) => labels.map(key).map((k) => flat[k]).find(Boolean) || '';\nconst firstName = pick('first_name', 'first name', 'firstname');\nconst lastName = pick('last_name', 'last name', 'lastname');\nconst email = pick('email', 'work email').toLowerCase().trim();\nconst company = pick('company', 'company name');\nconst role = pick('role', 'job title');\nconst messageRaw = pick('message_raw', 'how can we help', 'message', 'description');\nconst messageClean = messageRaw.replace(/\\s+/g, ' ').trim();\nconst source = pick('source') || 'tally_form';\nconst receivedAt = pick('received_at', 'submitted at', 'created at') || new Date().toISOString();\nconst submissionId = pick('submission_id', 'submission id', 'response id', 'id');\nconst errors = [];\nif (!/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(email)) errors.push('A valid email is required.');\nif (!messageClean) errors.push('A message is required.');\nconst fingerprint = `${submissionId}|${email}|${messageClean.toLowerCase()}`;\nlet hash = 5381;\nfor (const char of fingerprint) hash = ((hash << 5) + hash) ^ char.charCodeAt(0);\nconst leadId = submissionId || `lead_${(hash >>> 0).toString(36)}`;\nreturn {\n  json: {\n    workflow: 'OpsPilot - Main Intake',\n    accepted: errors.length === 0,\n    lead_id: leadId,\n    source,\n    received_at: receivedAt,\n    full_name: [firstName, lastName].filter(Boolean).join(' '),\n    first_name: firstName,\n    last_name: lastName,\n    email,\n    company,\n    role,\n    message_raw: messageRaw,\n    message_clean: messageClean,\n    validation_status: errors.length ? 'Needs Review' : 'Valid',\n    validation_errors: errors,\n    human_review_required: true,\n  }\n};"
+      },
+      "id": "b743ec26-fcb7-46d4-bfa3-e1f4491b4635",
+      "name": "Normalize And Validate",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        26144,
+        10832
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "cond-accepted",
+              "leftValue": "={{ $json.accepted }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "b1208ecc-0f83-4fcc-8b2e-afaca8764622",
+      "name": "IF Accepted",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        26368,
+        10832
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.hubapi.com/crm/v3/objects/contacts/search",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "hubspotAppToken",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ filterGroups: [{ filters: [{ propertyName: 'email', operator: 'EQ', value: $json.email }] }], properties: ['email', 'firstname', 'lastname', 'company', 'jobtitle'], limit: 1 }) }}",
+        "options": {}
+      },
+      "id": "a126e228-4e72-4754-b1ce-54cda52e542a",
+      "name": "HubSpot Search Contact",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        26592,
+        10688
+      ],
+      "credentials": {
+        "hubspotAppToken": {
+          "id": "REPLACE_WITH_YOUR_CREDENTIAL_ID",
+          "name": "hubspotAppToken account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const searchRaw = $input.item.json;\nconst lead = $('Normalize And Validate').item.json;\nlet contacts = [];\nif (Array.isArray(searchRaw)) {\n  contacts = searchRaw;\n} else if (searchRaw && Array.isArray(searchRaw.results)) {\n  contacts = searchRaw.results;\n} else if (searchRaw && searchRaw.id) {\n  contacts = [searchRaw];\n}\nconst existing = contacts.length > 0 ? contacts[0] : null;\nreturn {\n  json: {\n    ...lead,\n    hubspot_contact_exists: !!existing,\n    hs_contact_id: existing ? (existing.id || null) : null,\n    duplicate_risk: !!existing,\n    hs_existing_properties: existing ? (existing.properties || {}) : null,\n  }\n};"
+      },
+      "id": "a39d4216-b905-4d7e-8f71-27b72af910c6",
+      "name": "Attach Dedup Context",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        26816,
+        10688
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "anthropicApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "anthropic-version",
+              "value": "2023-06-01"
+            },
+            {
+              "name": "content-type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 800, system: 'You are a lead classification engine for OpsPilot AI, a B2B SaaS company selling internal automation tools to Operations and Customer Success teams.\\n\\nYour job is to analyze inbound messages from website forms or emails and return a structured classification object. You must always return valid JSON and nothing else: no explanation, no preamble, no markdown.\\n\\nCLASSIFICATION CATEGORIES\\n\\n\"Demo Request\": Person wants to see the product, book a call, or explore purchasing.\\n\"Support Request\": Existing or potential customer reporting a problem, outage, or blocker.\\n\"Partnership\": Agencies, resellers, or integration partners reaching out.\\n\"Incomplete\": Message lacks enough context to classify or act on.\\n\"Spam / Irrelevant\": Clearly off-topic, promotional, or automated.\\n\"Needs Review\": Ambiguous. Requires human judgment.\\n\\nPRIORITY LEVELS\\n\\n\"Urgent\": Support outage, time-sensitive blocker, or explicit urgency from an existing customer.\\n\"Hot\": Clear buying intent, specific timeline, or senior decision-maker.\\n\"Warm\": Interest is real but no urgency stated.\\n\"Cold\": Vague interest, no decision signal.\\n\"Needs Review\": Cannot be confidently assessed.\\n\\nCONFIDENCE LEVELS\\n\\n\"High\": Classification is unambiguous.\\n\"Medium\": One or two signals are missing but direction is clear.\\n\"Low\": Significant ambiguity. Human review recommended.\\n\\nCLASSIFICATION RULES\\n\\n1. If the message is fewer than 15 words with no company or role, classify as Incomplete.\\n2. If the message contains explicit urgency AND an existing-customer signal (\"we are customers\", \"our account\", \"your integration\"), classify as Support Request / Urgent.\\n3. If category is \"Needs Review\", priority must also be \"Needs Review\".\\n4. If priority is \"Needs Review\", confidence must be \"Low\".\\n5. A classified category must never have priority \"Needs Review\". If category is clear but priority is ambiguous, assign best available priority and set confidence to \"Low\".\\n6. Never invent information not present in the input.\\n7. If hubspot_contact_exists is true, you may signal existing_customer_signal in flags if the message content also supports it. Do not infer customer status from HubSpot alone.\\n\\nOUTPUT FIELD RULES\\n\\nsummary: Exactly 2 sentences. Sentence 1: who and what they want. Sentence 2: key signal that drove the classification.\\nintent_signals: Only phrases or facts directly present in the message. Do not paraphrase or invent.\\nrecommended_action: Specific. Name the action type and include a timeframe where urgency warrants it.\\ncrm_note: Third person, past tense. Format: \"[Name] submitted a [category] via [source]. Classified as [priority]. Key signals: [signals]. Recommended action: [action].\"\\ndraft_reply: Human-reviewable draft only. Never presented as ready to send. Professional B2B tone. First line acknowledges the specific reason they wrote. 3-5 sentences max.\\nflags: Use only these values: \"duplicate_risk\", \"urgent_escalation\", \"incomplete_data\", \"high_value_prospect\", \"existing_customer_signal\", \"partnership_signal\"\\n\\nOUTPUT SCHEMA\\n\\nReturn exactly this JSON and no other text:\\n{\\n  \"category\": string,\\n  \"priority\": string,\\n  \"summary\": string,\\n  \"intent_signals\": array,\\n  \"missing_fields\": array,\\n  \"recommended_action\": string,\\n  \"crm_note\": string,\\n  \"draft_reply\": string,\\n  \"confidence\": string,\\n  \"flags\": array\\n}', messages: [{ role: 'user', content: 'Classify the following inbound message.\\n\\nSender: ' + ($json.first_name || '') + ' ' + ($json.last_name || '') + '\\nEmail: ' + $json.email + '\\nCompany: ' + ($json.company || 'Not provided') + '\\nRole: ' + ($json.role || 'Not provided') + '\\nMessage: ' + $json.message_raw + '\\nExisting HubSpot contact: ' + ($json.hubspot_contact_exists ? 'Yes (contact ID: ' + $json.hs_contact_id + ')' : 'No') }] }) }}",
+        "options": {}
+      },
+      "id": "f3c6e188-cc68-4759-b25a-955c3ea2dca2",
+      "name": "Claude Classification",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        27024,
+        10688
+      ],
+      "credentials": {
+        "anthropicApi": {
+          "id": "REPLACE_WITH_YOUR_CREDENTIAL_ID",
+          "name": "anthropicApi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const dedup = $('Attach Dedup Context').item.json;\nconst raw = $input.item.json;\nconst VALID_CATEGORIES = ['Demo Request', 'Support Request', 'Partnership', 'Incomplete', 'Spam / Irrelevant', 'Needs Review'];\nconst VALID_PRIORITIES = ['Urgent', 'Hot', 'Warm', 'Cold', 'Needs Review'];\nconst VALID_FLAGS = ['duplicate_risk', 'urgent_escalation', 'incomplete_data', 'high_value_prospect', 'existing_customer_signal', 'partnership_signal'];\nlet rawText = '';\ntry {\n  if (raw.content && Array.isArray(raw.content)) {\n    rawText = raw.content.map(c => c.text || '').join('');\n  } else if (typeof raw.content === 'string') {\n    rawText = raw.content;\n  } else if (raw.text) {\n    rawText = raw.text;\n  } else {\n    rawText = JSON.stringify(raw);\n  }\n} catch(e) { rawText = ''; }\nconst stopReason = raw.stop_reason || raw.stopReason || '';\nconst tokenError = stopReason === 'max_tokens';\nlet classification = {};\nlet processingError = null;\ntry {\n  if (tokenError) throw new Error('max_tokens: response truncated');\n  const match = rawText.match(/\\{[\\s\\S]*\\}/);\n  if (!match) throw new Error('No JSON object found in Claude response');\n  classification = JSON.parse(match[0]);\n  if (!VALID_CATEGORIES.includes(classification.category)) throw new Error('Invalid category: ' + classification.category);\n  if (!VALID_PRIORITIES.includes(classification.priority)) throw new Error('Invalid priority: ' + classification.priority);\n  if (Array.isArray(classification.flags)) {\n    classification.flags = classification.flags.filter(f => VALID_FLAGS.includes(f));\n  } else {\n    classification.flags = [];\n  }\n} catch(e) {\n  processingError = e.message;\n  classification = {\n    category: 'Needs Review',\n    priority: 'Needs Review',\n    confidence: 'Low',\n    summary: 'AI classification failed. Manual review required.',\n    intent_signals: [],\n    missing_fields: [],\n    recommended_action: 'Review the message manually and classify before routing.',\n    crm_note: (dedup.full_name || dedup.email) + ' submitted a message via ' + dedup.source + '. AI classification failed. Manual review required.',\n    draft_reply: 'Thank you for your message. A team member will review your request and follow up shortly.',\n    flags: [],\n    human_review_required: true,\n  };\n}\nreturn {\n  json: {\n    ...dedup,\n    ...classification,\n    human_review_required: true,\n    processing_error: processingError || null,\n    airtable_status: processingError ? 'Error' : 'Processed',\n  }\n};"
+      },
+      "id": "28f593b7-7f64-4704-8561-e58eafc09e3d",
+      "name": "Parse And Validate Claude Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        27248,
+        10688
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "cond-skip",
+              "leftValue": "={{ $json.category === 'Spam / Irrelevant' || !!$json.processing_error }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "4a96a985-36fc-41cd-b39a-62fd33c2b86c",
+      "name": "IF Skip HubSpot",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        27472,
+        10688
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "cond-exists",
+              "leftValue": "={{ $json.hubspot_contact_exists }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "87a3d470-87b1-4b82-af93-bc067d3d6e85",
+      "name": "IF Contact Exists",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        27696,
+        10688
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.hubapi.com/crm/v3/objects/contacts",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "hubspotAppToken",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ properties: { email: $json.email, firstname: $json.first_name || '', lastname: $json.last_name || '', company: $json.company || '', jobtitle: $json.role || '', opspilot_ai_category: $json.category || '', opspilot_ai_priority: $json.priority || '', opspilot_ai_confidence: $json.confidence || '' } }) }}",
+        "options": {}
+      },
+      "id": "e708582b-984b-4c7d-82b4-4a9a245066e4",
+      "name": "HubSpot Create Contact",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        27904,
+        10560
+      ],
+      "credentials": {
+        "hubspotAppToken": {
+          "id": "REPLACE_WITH_YOUR_CREDENTIAL_ID",
+          "name": "hubspotAppToken account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "=https://api.hubapi.com/crm/v3/objects/contacts/{{ $json.hs_contact_id }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "hubspotAppToken",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ properties: { company: $json.company || '', jobtitle: $json.role || '', opspilot_ai_category: $json.category || '', opspilot_ai_priority: $json.priority || '', opspilot_ai_confidence: $json.confidence || '' } }) }}",
+        "options": {}
+      },
+      "id": "3f445834-4924-444f-a800-6e0eb9bd8cbb",
+      "name": "HubSpot Update Contact",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        27904,
+        10800
+      ],
+      "credentials": {
+        "hubspotAppToken": {
+          "id": "REPLACE_WITH_YOUR_CREDENTIAL_ID",
+          "name": "hubspotAppToken account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const hubspot = $input.item.json;\nconst dedup = $('Attach Dedup Context').item.json;\nconst classification = $('Parse And Validate Claude Response').item.json;\nconst hsContactId = hubspot.id || (hubspot.properties && hubspot.properties.hs_object_id) || dedup.hs_contact_id;\nconst hsAction = dedup.hubspot_contact_exists ? 'updated' : 'created';\nreturn {\n  json: {\n    ...dedup,\n    ...classification,\n    hs_contact_id: hsContactId,\n    hs_action: hsAction,\n    hs_deal_id: null,\n    hs_note_id: null,\n    hs_task_id: null,\n    airtable_status: dedup.hubspot_contact_exists\n      ? 'Duplicate Merged'\n      : (classification.processing_error ? 'Error' : 'Processed'),\n  }\n};"
+      },
+      "id": "ccdca05d-e2fa-45ab-ac42-c135795539a7",
+      "name": "Restore Context",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        28128,
+        10688
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "cond-new-demo",
+              "leftValue": "={{ $json.hubspot_contact_exists === false && $json.category === 'Demo Request' }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "bb772810-1996-4055-9945-208b9824f46c",
+      "name": "IF New Demo",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        28352,
+        10688
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.hubapi.com/crm/v3/objects/deals",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "hubspotAppToken",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ properties: { dealname: ($json.company || $json.full_name || $json.email) + ' - Demo Request', dealstage: $json.priority === 'Hot' ? 'REPLACE_WITH_HOT_STAGE_ID' : ($json.priority === 'Warm' ? 'REPLACE_WITH_WARM_STAGE_ID' : 'REPLACE_WITH_COLD_STAGE_ID') }, associations: [{ to: { id: $json.hs_contact_id }, types: [{ associationCategory: 'HUBSPOT_DEFINED', associationTypeId: 3 }] }] }) }}",
+        "options": {}
+      },
+      "id": "c84c2831-315f-4097-873a-3d73b77363cf",
+      "name": "HubSpot Create Deal",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        28576,
+        10560
+      ],
+      "credentials": {
+        "hubspotAppToken": {
+          "id": "REPLACE_WITH_YOUR_CREDENTIAL_ID",
+          "name": "hubspotAppToken account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.hubapi.com/crm/v3/objects/notes",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "hubspotAppToken",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ properties: { hs_note_body: $('Restore Context').item.json.crm_note, hs_timestamp: new Date().getTime() }, associations: [{ to: { id: $('Restore Context').item.json.hs_contact_id }, types: [{ associationCategory: 'HUBSPOT_DEFINED', associationTypeId: 202 }] }] }) }}",
+        "options": {}
+      },
+      "id": "e92fa475-bca4-4636-af22-9fcb7732caa5",
+      "name": "HubSpot Create Note",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        28784,
+        10688
+      ],
+      "credentials": {
+        "hubspotAppToken": {
+          "id": "REPLACE_WITH_YOUR_CREDENTIAL_ID",
+          "name": "hubspotAppToken account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "cond-task",
+              "leftValue": "={{ $('Restore Context').item.json.priority === 'Hot' || $('Restore Context').item.json.priority === 'Urgent' || $('Restore Context').item.json.category === 'Incomplete' }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "b97e0aaa-c6ee-4fcc-97a5-4c6c8eb0e554",
+      "name": "IF Create Task",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        29008,
+        10688
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.hubapi.com/crm/v3/objects/tasks",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "hubspotAppToken",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ properties: { hs_task_subject: $('Restore Context').item.json.recommended_action.slice(0, 200), hs_task_body: $('Restore Context').item.json.summary, hs_task_status: 'NOT_STARTED', hs_timestamp: ($('Restore Context').item.json.priority === 'Urgent' ? new Date(Date.now() + 3600000) : new Date(Date.now() + 86400000)).getTime() }, associations: [{ to: { id: $('Restore Context').item.json.hs_contact_id }, types: [{ associationCategory: 'HUBSPOT_DEFINED', associationTypeId: 204 }] }] }) }}",
+        "options": {}
+      },
+      "id": "0c8b496c-ff0b-4473-a809-fc18cfe7115d",
+      "name": "HubSpot Create Task",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        29232,
+        10560
+      ],
+      "credentials": {
+        "hubspotAppToken": {
+          "id": "REPLACE_WITH_YOUR_CREDENTIAL_ID",
+          "name": "hubspotAppToken account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Consolidate data from whichever branch was taken\nlet norm = null, claude = null, restore = null;\ntry { norm = $('Normalize And Validate').item.json; } catch(e) {}\ntry { claude = $('Parse And Validate Claude Response').item.json; } catch(e) {}\ntry { restore = $('Restore Context').item.json; } catch(e) {}\nconst base = restore || claude || norm || {};\nlet hs_contact_id = String(base.hs_contact_id || '');\nlet hs_deal_id = String(base.hs_deal_id || '');\ntry {\n  const deal = $('HubSpot Create Deal').item.json;\n  if (deal && (deal.id || deal.dealId)) hs_deal_id = String(deal.id || deal.dealId);\n} catch(e) {}\nlet status = 'Processed';\nif (base.processing_error) status = 'Error';\nelse if (base.accepted === false) status = 'Needs Review';\nelse if (base.airtable_status) status = base.airtable_status;\nconst priority = base.priority || '';\nconst category = base.category || '';\nconst owner = (priority === 'Urgent' || priority === 'Hot') ? 'AE' : (category === 'Incomplete' ? 'SDR' : 'Ops');\nconst hs_contact_url = hs_contact_id ? 'https://app-eu1.hubspot.com/contacts/__HUBSPOT_PORTAL_ID__/contact/' + hs_contact_id : '';\nreturn { json: {\n  lead_id: base.lead_id || '',\n  received_at: base.received_at || '',\n  source: base.source || 'tally_form',\n  full_name: base.full_name || '',\n  email: base.email || '',\n  company: base.company || '',\n  category: category,\n  priority: priority,\n  hs_action: base.hs_action || '',\n  hs_contact_id: hs_contact_id,\n  hs_deal_id: hs_deal_id,\n  hs_contact_url: hs_contact_url,\n  summary: base.summary || '',\n  draft_reply: base.draft_reply || '',\n  confidence: base.confidence || '',\n  flags: Array.isArray(base.flags) ? base.flags : [],\n  processing_error: base.processing_error || null,\n  status: status,\n  owner: owner,\n}};"
+      },
+      "id": "64fff851-67b4-4c19-87ee-d53a380324ab",
+      "name": "Build Airtable Record",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        29456,
+        10832
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "airtableOAuth2Api",
+        "operation": "create",
+        "base": {
+          "__rl": true,
+          "value": "appYOURBASEID0000",
+          "mode": "list"
+        },
+        "table": {
+          "__rl": true,
+          "value": "tblYOURTABLEID000",
+          "mode": "list"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "lead_id": "={{ $json.lead_id }}",
+            "received_at": "={{ $json.received_at }}",
+            "source": "={{ $json.source }}",
+            "full_name": "={{ $json.full_name || '' }}",
+            "email": "={{ $json.email || '' }}",
+            "company": "={{ $json.company || '' }}",
+            "category": "={{ $json.category || 'Needs Review' }}",
+            "priority": "={{ $json.priority || 'Needs Review' }}",
+            "hs_action": "={{ $json.hs_action || '' }}",
+            "hs_contact_id": "={{ $json.hs_contact_id || '' }}",
+            "hs_deal_id": "={{ $json.hs_deal_id || '' }}",
+            "hs_contact_url": "={{ $json.hs_contact_url || '' }}",
+            "summary": "={{ $json.summary || '' }}",
+            "draft_reply_snippet": "={{ ($json.draft_reply || '').slice(0, 500) }}",
+            "flags": "={{ ($json.flags || []).join(', ') }}",
+            "status": "={{ $json.status || 'Processed' }}",
+            "owner": "={{ $json.owner || '' }}",
+            "processed_at": "={{ $json.received_at || '' }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "lead_id",
+              "displayName": "lead_id",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "received_at",
+              "displayName": "received_at",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "dateTime",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "source",
+              "displayName": "source",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "options",
+              "options": [
+                {
+                  "name": "tally_form",
+                  "value": "tally_form"
+                }
+              ],
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "full_name",
+              "displayName": "full_name",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "email",
+              "displayName": "email",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "company",
+              "displayName": "company",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "category",
+              "displayName": "category",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "priority",
+              "displayName": "priority",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "hs_action",
+              "displayName": "hs_action",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "hs_contact_id",
+              "displayName": "hs_contact_id",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "hs_deal_id",
+              "displayName": "hs_deal_id",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "hs_contact_url",
+              "displayName": "hs_contact_url",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "summary",
+              "displayName": "summary",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "draft_reply_snippet",
+              "displayName": "draft_reply_snippet",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "flags",
+              "displayName": "flags",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "owner",
+              "displayName": "owner",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "processed_at",
+              "displayName": "processed_at",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "b39fa375-f1ad-46ca-8bc5-3c2a3e417f3d",
+      "name": "Airtable Write",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.1,
+      "position": [
+        29680,
+        10832
+      ],
+      "credentials": {
+        "airtableOAuth2Api": {
+          "id": "REPLACE_WITH_YOUR_CREDENTIAL_ID",
+          "name": "airtableOAuth2Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "cond-alert",
+              "leftValue": "={{ $json.fields?.priority === 'Hot' || $json.fields?.priority === 'Urgent' || $json.fields?.category === 'Incomplete' || $json.fields?.category === 'Needs Review' || $json.fields?.status === 'Needs Review' }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "b4426ddb-22dc-4193-a3ea-59981d09148f",
+      "name": "IF Needs Alert",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        29888,
+        10832
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "REPLACE_WITH_YOUR_CHAT_ID",
+        "text": "={{ $json.fields?.category === 'Support Request' ? '🚨 Urgent Support' : ($json.fields?.priority === 'Hot' ? '🔥 Hot Lead' : '🔔 Needs Review') }} — {{ $json.fields?.full_name || 'Unknown' }}\nCompany: {{ $('Parse And Validate Claude Response').item.json.company || $('Normalize And Validate').item.json.company || 'N/A' }}\nCategory: {{ $json.fields?.category }} | Priority: {{ $json.fields?.priority }}\n{{ $('Parse And Validate Claude Response').item.json.summary || 'No summary.' }}\n→ Review manually.\n#ID:{{ $json.id }}",
+        "replyMarkup": "inlineKeyboard",
+        "inlineKeyboard": {
+          "rows": [
+            {
+              "row": {
+                "buttons": [
+                  {
+                    "text": "✅ Approve draft",
+                    "additionalFields": {
+                      "callback_data": "approve"
+                    }
+                  },
+                  {
+                    "text": "❌ Reject",
+                    "additionalFields": {
+                      "callback_data": "reject"
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "additionalFields": {}
+      },
+      "id": "b65d6adf-445f-424a-a638-81d18edbe9bc",
+      "name": "Telegram Alert",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        30112,
+        10688
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "REPLACE_WITH_YOUR_CREDENTIAL_ID",
+          "name": "telegramApi account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Tally Demo Request Webhook": {
+      "main": [
+        [
+          {
+            "node": "Normalize And Validate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize And Validate": {
+      "main": [
+        [
+          {
+            "node": "IF Accepted",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Accepted": {
+      "main": [
+        [
+          {
+            "node": "HubSpot Search Contact",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Airtable Record",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HubSpot Search Contact": {
+      "main": [
+        [
+          {
+            "node": "Attach Dedup Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Attach Dedup Context": {
+      "main": [
+        [
+          {
+            "node": "Claude Classification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claude Classification": {
+      "main": [
+        [
+          {
+            "node": "Parse And Validate Claude Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse And Validate Claude Response": {
+      "main": [
+        [
+          {
+            "node": "IF Skip HubSpot",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Skip HubSpot": {
+      "main": [
+        [
+          {
+            "node": "Build Airtable Record",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "IF Contact Exists",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Contact Exists": {
+      "main": [
+        [
+          {
+            "node": "HubSpot Update Contact",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "HubSpot Create Contact",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HubSpot Create Contact": {
+      "main": [
+        [
+          {
+            "node": "Restore Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HubSpot Update Contact": {
+      "main": [
+        [
+          {
+            "node": "Restore Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Restore Context": {
+      "main": [
+        [
+          {
+            "node": "IF New Demo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF New Demo": {
+      "main": [
+        [
+          {
+            "node": "HubSpot Create Deal",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "HubSpot Create Note",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HubSpot Create Deal": {
+      "main": [
+        [
+          {
+            "node": "HubSpot Create Note",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HubSpot Create Note": {
+      "main": [
+        [
+          {
+            "node": "IF Create Task",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Create Task": {
+      "main": [
+        [
+          {
+            "node": "HubSpot Create Task",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Airtable Record",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HubSpot Create Task": {
+      "main": [
+        [
+          {
+            "node": "Build Airtable Record",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Airtable Record": {
+      "main": [
+        [
+          {
+            "node": "Airtable Write",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Airtable Write": {
+      "main": [
+        [
+          {
+            "node": "IF Needs Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Needs Alert": {
+      "main": [
+        [
+          {
+            "node": "Telegram Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false,
+    "timeSavedMode": "fixed",
+    "errorWorkflow": "0kfxJiDRZFwWfZVr",
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "meta": {
+    "templateCredsSetupCompleted": true
+  }
+}

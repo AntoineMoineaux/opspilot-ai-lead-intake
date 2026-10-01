@@ -1,0 +1,56 @@
+{
+  "name": "OpsPilot - Error Handler",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "91c108d1-d064-4d35-9845-800b65d392fe",
+      "name": "Error Trigger",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "REPLACE_WITH_YOUR_CHAT_ID",
+        "text": "⚠️ OpsPilot — Erreur workflow\nWorkflow: {{ $json.execution.workflow.name }}\nExécution: #{{ $json.execution.id }}\nNœud: {{ $json.execution.lastNodeExecuted || 'inconnu' }}\nErreur: {{ $json.execution.error.message }}\n→ {{ $json.execution.url }}",
+        "additionalFields": {}
+      },
+      "id": "45988610-93d4-4523-83e0-32c6afd0fd10",
+      "name": "Telegram Error Alert",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        224,
+        0
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "REPLACE_WITH_YOUR_CREDENTIAL_ID",
+          "name": "telegramApi account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Error Trigger": {
+      "main": [
+        [
+          {
+            "node": "Telegram Error Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "meta": null
+}
