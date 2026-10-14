@@ -4,6 +4,8 @@ An n8n system that takes an inbound form submission, qualifies it with an LLM, w
 
 Built and deployed for a client. The client's identity and industry are not disclosed. The workflows in this repository are the production workflows with every credential, identifier and real data sample removed. See [What was removed](#what-was-removed-before-publishing).
 
+**In production since June 2026.**
+
 ## Why it exists
 
 A small team was handling inbound demo requests by hand: read the form, judge the intent, look the person up in the CRM, create or update the contact, write a note, decide who follows up, draft a reply. Around ten minutes per request, done inconsistently, and the CRM slowly filled with duplicates.
@@ -52,12 +54,13 @@ Measured on the deployment:
 
 | | |
 |---|---|
-| Requests processed in production | 45+ |
+| In production since | **June 2026**, with no intervention from me |
 | Handling time before | about 10 minutes, manual |
 | Handling time after | under 2 minutes |
 | Reduction | about 80% |
 | Operator approval rate | about 70% of AI drafts approved without an edit |
 | Replies sent without human approval | zero, by design |
+| Requests processed in production | 45+ |
 
 **Honest limitation.** End-to-end QA was run on controlled scenarios, not at high production volume. The 45+ figure is real traffic, not a load test.
 
