@@ -54,7 +54,7 @@ Measured on the deployment:
 
 | | |
 |---|---|
-| In production since | **June 2026**, with no intervention from me |
+| In production since | **June 2026**, with no corrective work needed since |
 | Handling time before | about 10 minutes, manual |
 | Handling time after | under 2 minutes |
 | Reduction | about 80% |
