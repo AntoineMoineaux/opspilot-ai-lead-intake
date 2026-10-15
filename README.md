@@ -60,9 +60,9 @@ Measured on the deployment:
 | Reduction | about 80% |
 | Operator approval rate | about 70% of AI drafts approved without an edit |
 | Replies sent without human approval | zero, by design |
-| Requests processed in production | 45+ |
+| Requests processed in production | 45 during the launch phase, around 100 per week today |
 
-**Honest limitation.** End-to-end QA was run on controlled scenarios, not at high production volume. The 45+ figure is real traffic, not a load test.
+**Honest limitation.** End-to-end QA was run on controlled scenarios, not at high production volume. These are real traffic figures, not a load test.
 
 ## The design decisions worth reading
 
